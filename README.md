@@ -4,13 +4,13 @@ A library for developing Pokemon Mini homebrew in [Nelua](https://nelua.io/), ta
 
 ## Prerequisites
 
-- **TASKING E0C88 Toolchain** -- Install via [c88-pokemini](https://github.com/pokemon-mini/c88-pokemini):
+- **TASKING E0C88 Toolchain**: Install via [c88-pokemini](https://github.com/pokemon-mini/c88-pokemini):
   ```powershell
   cd C:\Users\isaac\c88-pokemini
   .\install.ps1
   ```
-- **Nelua** -- [nelua.io](https://nelua.io/)
-- **PokeMini Emulator** -- For testing ROMs
+- **Nelua**: [nelua.io](https://nelua.io/)
+- **PokeMini Emulator**
 
 ## Getting Started
 
