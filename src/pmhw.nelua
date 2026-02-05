@@ -1,0 +1,289 @@
+--[[
+  Pokémon Mini Hardware Abstraction Layer
+  Target: Epson S1C88 (8-bit CPU)
+]]
+
+## pragma{nogc = true, nochecks = true}
+
+-- ============================================================================
+-- Hardware Register Mappings (using comptime addresses to avoid static init)
+-- ============================================================================
+
+-- These MUST be comptime to avoid generating initialized static variables
+-- that require __copytable to work (which we don't use)
+local PM_GDDRAM_ADDR: usize <comptime> = 0x1000
+local PM_SYS_CTRL1_ADDR: usize <comptime> = 0x2000
+local PM_KEY_PAD_ADDR: usize <comptime> = 0x2052
+local PM_PRC_MODE_ADDR: usize <comptime> = 0x2080
+local PM_PRC_RATE_ADDR: usize <comptime> = 0x2081
+local PM_IRQ_ACT1_ADDR: usize <comptime> = 0x2027
+
+-- Inline accessor functions that compute pointer at runtime from constant
+local function PM_GDDRAM(): *[768]uint8 <inline, nosideeffect>
+  return (@*[768]uint8)(PM_GDDRAM_ADDR)
+end
+
+local function PM_SYS_CTRL1(): *uint8 <inline, nosideeffect>
+  return (@*uint8)(PM_SYS_CTRL1_ADDR)
+end
+
+local function PM_KEY_PAD(): *uint8 <inline, nosideeffect>
+  return (@*uint8)(PM_KEY_PAD_ADDR)
+end
+
+local function PM_PRC_MODE(): *uint8 <inline, nosideeffect>
+  return (@*uint8)(PM_PRC_MODE_ADDR)
+end
+
+local function PM_PRC_RATE(): *uint8 <inline, nosideeffect>
+  return (@*uint8)(PM_PRC_RATE_ADDR)
+end
+
+local function PM_IRQ_ACT1(): *uint8 <inline, nosideeffect>
+  return (@*uint8)(PM_IRQ_ACT1_ADDR)
+end
+
+-- ============================================================================
+-- Constants
+-- ============================================================================
+
+global SCREEN_WIDTH: uint8 <comptime> = 96
+global SCREEN_HEIGHT: uint8 <comptime> = 64
+global GDDRAM_SIZE: uint16 <comptime> = 768
+
+-- PRC Control bits (from pm.h)
+global PRC_MAP_INVERT: uint8 <comptime> = 0x01    -- _BV(0)
+global PRC_MAP_ENABLE: uint8 <comptime> = 0x02    -- _BV(1) 
+global PRC_SPR_ENABLE: uint8 <comptime> = 0x04    -- _BV(2)
+global PRC_COPY_ENABLE: uint8 <comptime> = 0x08   -- _BV(3) - copies GDDRAM to LCD
+
+-- Refresh rates
+global PRC_RATE_72HZ: uint8 <comptime> = 0x08
+global PRC_RATE_60HZ: uint8 <comptime> = 0x0A
+global PRC_RATE_48HZ: uint8 <comptime> = 0x0C
+global PRC_RATE_36HZ: uint8 <comptime> = 0x10
+
+-- Key bitmasks
+global KEY_A: uint8 <comptime> = 0x01
+global KEY_B: uint8 <comptime> = 0x02
+global KEY_C: uint8 <comptime> = 0x04
+global KEY_UP: uint8 <comptime> = 0x08
+global KEY_DOWN: uint8 <comptime> = 0x10
+global KEY_LEFT: uint8 <comptime> = 0x20
+global KEY_RIGHT: uint8 <comptime> = 0x40
+global KEY_POWER: uint8 <comptime> = 0x80
+
+-- System control bits
+global SYS_CLK_4MHZ: uint8 <comptime> = 0x00
+global SYS_CLK_1MHZ: uint8 <comptime> = 0x01
+
+-- ============================================================================
+-- Fixed-Point Math (8.8 format)
+-- ============================================================================
+
+global Fixed8_8 = @record{
+  raw: int16  -- 8 bits integer, 8 bits fraction
+}
+
+global FIXED_ONE: int16 <comptime> = 256  -- 1.0 in 8.8 format
+global FIXED_HALF: int16 <comptime> = 128 -- 0.5 in 8.8 format
+
+function Fixed8_8.from_int(v: int16): Fixed8_8 <inline, nosideeffect>
+  return Fixed8_8{raw = v << 8}
+end
+
+function Fixed8_8.from_frac(integer: int16, frac: uint8): Fixed8_8 <inline, nosideeffect>
+  return Fixed8_8{raw = (integer << 8) | frac}
+end
+
+function Fixed8_8.to_int(self: Fixed8_8): int16 <inline, nosideeffect>
+  return self.raw >> 8
+end
+
+function Fixed8_8.__add(a: Fixed8_8, b: Fixed8_8): Fixed8_8 <inline, nosideeffect>
+  return Fixed8_8{raw = a.raw + b.raw}
+end
+
+function Fixed8_8.__sub(a: Fixed8_8, b: Fixed8_8): Fixed8_8 <inline, nosideeffect>
+  return Fixed8_8{raw = a.raw - b.raw}
+end
+
+function Fixed8_8.__mul(a: Fixed8_8, b: Fixed8_8): Fixed8_8 <inline, nosideeffect>
+  local result: int32 = (@int32)(a.raw) * (@int32)(b.raw)
+  return Fixed8_8{raw = (@int16)(result >> 8)}
+end
+
+function Fixed8_8.__div(a: Fixed8_8, b: Fixed8_8): Fixed8_8 <inline, nosideeffect>
+  local result: int32 = ((@int32)(a.raw) << 8) /// (@int32)(b.raw)
+  return Fixed8_8{raw = (@int16)(result)}
+end
+
+function Fixed8_8.__unm(a: Fixed8_8): Fixed8_8 <inline, nosideeffect>
+  return Fixed8_8{raw = -a.raw}
+end
+
+function Fixed8_8.__lt(a: Fixed8_8, b: Fixed8_8): boolean <inline, nosideeffect>
+  return a.raw < b.raw
+end
+
+function Fixed8_8.__le(a: Fixed8_8, b: Fixed8_8): boolean <inline, nosideeffect>
+  return a.raw <= b.raw
+end
+
+-- ============================================================================
+-- Fixed-Point Math (12.4 format) - More integer precision
+-- ============================================================================
+
+global Fixed12_4 = @record{
+  raw: int16  -- 12 bits integer, 4 bits fraction
+}
+
+global FIXED12_ONE: int16 <comptime> = 16   -- 1.0 in 12.4 format
+
+function Fixed12_4.from_int(v: int16): Fixed12_4 <inline, nosideeffect>
+  return Fixed12_4{raw = v << 4}
+end
+
+function Fixed12_4.to_int(self: Fixed12_4): int16 <inline, nosideeffect>
+  return self.raw >> 4
+end
+
+function Fixed12_4.__add(a: Fixed12_4, b: Fixed12_4): Fixed12_4 <inline, nosideeffect>
+  return Fixed12_4{raw = a.raw + b.raw}
+end
+
+function Fixed12_4.__sub(a: Fixed12_4, b: Fixed12_4): Fixed12_4 <inline, nosideeffect>
+  return Fixed12_4{raw = a.raw - b.raw}
+end
+
+function Fixed12_4.__mul(a: Fixed12_4, b: Fixed12_4): Fixed12_4 <inline, nosideeffect>
+  local result: int32 = (@int32)(a.raw) * (@int32)(b.raw)
+  return Fixed12_4{raw = (@int16)(result >> 4)}
+end
+
+-- ============================================================================
+-- Low-Level Hardware Functions
+-- ============================================================================
+
+-- Lookup table for bit masks (initialized at runtime to avoid copytable issues)
+local BIT_MASKS: [8]uint8
+
+local function init_bit_masks(): void
+  BIT_MASKS[0] = 0x01
+  BIT_MASKS[1] = 0x02
+  BIT_MASKS[2] = 0x04
+  BIT_MASKS[3] = 0x08
+  BIT_MASKS[4] = 0x10
+  BIT_MASKS[5] = 0x20
+  BIT_MASKS[6] = 0x40
+  BIT_MASKS[7] = 0x80
+end
+
+local function clear_gddram(): void <inline>
+  local gddram = PM_GDDRAM()
+  for i: uint16 = 0, < GDDRAM_SIZE do
+    gddram[i] = 0x00
+  end
+end
+
+global function init_hw(): void <noinline>
+  init_bit_masks()
+  $PM_SYS_CTRL1() = SYS_CLK_4MHZ
+  $PM_PRC_RATE() = PRC_RATE_72HZ
+  $PM_PRC_MODE() = PRC_COPY_ENABLE  -- Just enable GDDRAM copy to LCD
+  clear_gddram()
+end
+
+global function flip_buffer(): void <inline>
+  $PM_PRC_MODE() = $PM_PRC_MODE() | PRC_COPY_ENABLE
+end
+
+global function set_pixel(x: int16, y: int16, color: uint8): void <inline>
+  if x < 0 or x >= SCREEN_WIDTH or y < 0 or y >= SCREEN_HEIGHT then
+    return
+  end
+  
+  local gddram = PM_GDDRAM()
+  local byte_row: uint16 = (@uint16)(y) >> 3
+  local byte_offset: uint16 = byte_row * 96 + (@uint16)(x)
+  local bit_idx: uint8 = (@uint8)(y) & 0x07
+  local bit_mask: uint8 = BIT_MASKS[bit_idx]
+  
+  if color ~= 0 then
+    gddram[byte_offset] = gddram[byte_offset] | bit_mask
+  else
+    gddram[byte_offset] = gddram[byte_offset] & (~bit_mask)
+  end
+end
+
+global function get_pixel(x: int16, y: int16): uint8 <inline>
+  if x < 0 or x >= SCREEN_WIDTH or y < 0 or y >= SCREEN_HEIGHT then
+    return 0
+  end
+  
+  local gddram = PM_GDDRAM()
+  local byte_row: uint16 = (@uint16)(y) >> 3
+  local byte_offset: uint16 = byte_row * 96 + (@uint16)(x)
+  local bit_idx: uint8 = (@uint8)(y) & 0x07
+  local bit_mask: uint8 = BIT_MASKS[bit_idx]
+  
+  if (gddram[byte_offset] & bit_mask) ~= 0 then
+    return 1
+  else
+    return 0
+  end
+end
+
+global function poll_input(): uint8 <inline>
+  return ~$PM_KEY_PAD()
+end
+
+-- IRQ1_PRC_COMPLETE = 0x80 (bit 7)
+global function wait_vsync(): void <inline>
+  $PM_IRQ_ACT1() = 0x80  -- Clear PRC complete flag
+  while ($PM_IRQ_ACT1() & 0x80) == 0 do
+    -- Wait for PRC frame complete
+  end
+end
+
+global function clear_screen(): void <inline>
+  clear_gddram()
+end
+
+global function fill_screen(pattern: uint8): void <inline>
+  local gddram = PM_GDDRAM()
+  for i: uint16 = 0, < GDDRAM_SIZE do
+    gddram[i] = pattern
+  end
+end
+
+-- ============================================================================
+-- Drawing Utilities
+-- ============================================================================
+
+global function draw_hline(x: int16, y: int16, w: int16, color: uint8): void
+  for i: int16 = 0, < w do
+    set_pixel(x + i, y, color)
+  end
+end
+
+global function draw_vline(x: int16, y: int16, h: int16, color: uint8): void
+  for i: int16 = 0, < h do
+    set_pixel(x, y + i, color)
+  end
+end
+
+global function draw_rect(x: int16, y: int16, w: int16, h: int16, color: uint8): void
+  draw_hline(x, y, w, color)
+  draw_hline(x, y + h - 1, w, color)
+  draw_vline(x, y, h, color)
+  draw_vline(x + w - 1, y, h, color)
+end
+
+global function fill_rect(x: int16, y: int16, w: int16, h: int16, color: uint8): void
+  for py: int16 = y, < y + h do
+    for px: int16 = x, < x + w do
+      set_pixel(px, py, color)
+    end
+  end
+end

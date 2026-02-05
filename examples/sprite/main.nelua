@@ -1,0 +1,93 @@
+--[[
+  Pokémon Mini Homebrew - Custom sprite example with movement
+  Target: Epson S1C88 (8-bit CPU)
+  Toolchain: cc88 + mk88
+]]
+
+## pragma{nogc = true, nochecks = true}
+
+require 'pmhw'
+
+-- ============================================================================
+-- Constants
+-- ============================================================================
+
+local SPRITE_SIZE: int16 <comptime> = 8
+
+-- ============================================================================
+-- Game State
+-- ============================================================================
+
+local playerX: int16
+local playerY: int16
+local prevX: int16
+local prevY: int16
+
+-- ============================================================================
+-- Sprite Drawing
+-- ============================================================================
+
+local function drawSprite(x: int16, y: int16, color: uint8): void
+  draw_rect(x, y, SPRITE_SIZE, SPRITE_SIZE, color)
+  for i: int16 = 0, < SPRITE_SIZE do
+    set_pixel(x + i, y + i, color)
+    set_pixel(x + SPRITE_SIZE - 1 - i, y + i, color)
+  end
+end
+
+-- ============================================================================
+-- Game Logic
+-- ============================================================================
+
+local function initGame(): void
+  playerX = 44
+  playerY = 28
+  prevX = 44
+  prevY = 28
+
+  clear_screen()
+  draw_rect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, 1)
+  drawSprite(playerX, playerY, 1)
+end
+
+local function updateGame(): void
+  local keys: uint8 = poll_input()
+
+  prevX = playerX
+  prevY = playerY
+
+  if (keys & KEY_LEFT) ~= 0 and playerX > 1 then
+    playerX = playerX - 1
+  end
+  if (keys & KEY_RIGHT) ~= 0 and playerX < SCREEN_WIDTH - SPRITE_SIZE - 1 then
+    playerX = playerX + 1
+  end
+  if (keys & KEY_UP) ~= 0 and playerY > 1 then
+    playerY = playerY - 1
+  end
+  if (keys & KEY_DOWN) ~= 0 and playerY < SCREEN_HEIGHT - SPRITE_SIZE - 1 then
+    playerY = playerY + 1
+  end
+end
+
+local function renderGame(): void
+  if playerX ~= prevX or playerY ~= prevY then
+    drawSprite(prevX, prevY, 0)
+    drawSprite(playerX, playerY, 1)
+  end
+end
+
+-- ============================================================================
+-- Entry Point
+-- ============================================================================
+
+local function main(): void <entrypoint>
+  init_hw()
+  initGame()
+
+  while true do
+    wait_vsync()
+    renderGame()
+    updateGame()
+  end
+end

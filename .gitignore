@@ -1,0 +1,8 @@
+build/
+*.obj
+*.o
+*.lst
+*.src
+*.sre
+*.out
+*.min

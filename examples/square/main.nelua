@@ -1,0 +1,79 @@
+--[[
+  Pokémon Mini Homebrew - Basic example with moving square
+  Target: Epson S1C88 (8-bit CPU)
+  Toolchain: cc88 + mk88
+]]
+
+## pragma{nogc = true, nochecks = true}
+
+require 'pmhw'
+
+-- ============================================================================
+-- Game State 
+-- ============================================================================
+
+local player_x: int16
+local player_y: int16
+local prev_x: int16
+local prev_y: int16
+local first_frame: uint8
+
+-- ============================================================================
+-- Game Logic
+-- ============================================================================
+
+local function init_game(): void
+  player_x = 46  
+  player_y = 30  
+  prev_x = 46
+  prev_y = 30
+  first_frame = 1
+  
+  clear_screen()
+  draw_rect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, 1)
+  fill_rect(player_x, player_y, 4, 4, 1)
+end
+
+local function update_game(): void
+  local keys: uint8 = poll_input()
+  
+  prev_x = player_x
+  prev_y = player_y
+  
+  if (keys & KEY_LEFT) ~= 0 and player_x > 1 then
+    player_x = player_x - 1
+  end
+  if (keys & KEY_RIGHT) ~= 0 and player_x < 91 then
+    player_x = player_x + 1
+  end
+  if (keys & KEY_UP) ~= 0 and player_y > 1 then
+    player_y = player_y - 1
+  end
+  if (keys & KEY_DOWN) ~= 0 and player_y < 59 then
+    player_y = player_y + 1
+  end
+end
+
+local function render_game(): void
+  if player_x ~= prev_x or player_y ~= prev_y then
+    -- Erase old position
+    fill_rect(prev_x, prev_y, 4, 4, 0)
+    -- Draw new position
+    fill_rect(player_x, player_y, 4, 4, 1)
+  end
+end
+
+-- ============================================================================
+-- Entry Point
+-- ============================================================================
+
+local function main(): void <entrypoint>
+  init_hw()
+  init_game()
+  
+  while true do
+    wait_vsync()    
+    render_game()   
+    update_game()   
+  end
+end
