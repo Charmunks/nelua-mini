@@ -8,7 +8,7 @@ A library for developing Pokemon Mini homebrew in [Nelua](https://nelua.io/), ta
 
 - **TASKING E0C88 Toolchain**: Install via [c88-pokemini](https://github.com/pokemon-mini/c88-pokemini):
   ```powershell
-  cd C:\Users\isaac\c88-pokemini
+  cd C:\Users\your-user\c88-pokemini
   .\install.ps1
   ```
 - **Nelua**: [nelua.io](https://nelua.io/)
@@ -27,7 +27,7 @@ cd examples\demo
 Or build any source file directly from the project root:
 
 ```powershell
-.\tools\build.ps1 -Source examples\demo\main.nelua
+.\tools\build.ps1 -Source examples\text\main.nelua
 .\tools\build.ps1 run -Source examples\sqaure\main.nelua
 ```
 
@@ -48,7 +48,7 @@ Build targets:
 src/
   pmhw.nelua              Hardware abstraction layer (the library)
 examples/
-  demo/
+  sqaure/
     main.nelua             Example application
 tools/
   build.ps1               Build script
