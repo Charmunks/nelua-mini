@@ -1,0 +1,226 @@
+--[[
+  Pokémon Mini Homebrew - Snake game example
+  Target: Epson S1C88 (8-bit CPU)
+  Toolchain: cc88 + mk88
+]]
+
+## pragma{nogc = true, nochecks = true}
+
+require 'pmhw'
+
+-- ============================================================================
+-- Game State 
+-- ============================================================================
+
+local MAX_PIXELS: int16 <comptime> = 64
+local INITIAL_LENGTH: int16 <comptime> = 3
+
+local Pixel = @record{
+  x: int16,
+  y: int16
+}
+
+local DIR_NONE: uint8 <comptime> = 0
+local DIR_LEFT: uint8 <comptime> = 1
+local DIR_RIGHT: uint8 <comptime> = 2
+local DIR_UP: uint8 <comptime> = 3
+local DIR_DOWN: uint8 <comptime> = 4
+local MOVE_INTERVAL: uint8 <comptime> = 3
+
+local pixels: [64]Pixel
+local prevPixels: [64]Pixel
+local pixelCount: int16
+local prevPixelCount: int16
+local headX: int16
+local headY: int16
+local direction: uint8
+local moveTimer: uint8
+local appleX: int16
+local appleY: int16
+local prevAppleX: int16
+local prevAppleY: int16
+local rngState: uint16
+
+-- ============================================================================
+-- Game Logic
+-- ============================================================================
+
+local function nextRandom(): uint16
+  local bit: uint16 = ((rngState >> 0) ~ (rngState >> 2) ~ (rngState >> 3) ~ (rngState >> 5)) & 1
+  rngState = (rngState >> 1) | (bit << 15)
+  return rngState
+end
+
+local function isOnSnake(px: int16, py: int16): boolean
+  for i: int16 = 0, < pixelCount do
+    if pixels[i].x == px and pixels[i].y == py then
+      return true
+    end
+  end
+  return false
+end
+
+local function spawnApple(): void
+  local rx: int16 = (@int16)(nextRandom() % 94) + 1
+  local ry: int16 = (@int16)(nextRandom() % 62) + 1
+  while isOnSnake(rx, ry) do
+    rx = (@int16)(nextRandom() % 94) + 1
+    ry = (@int16)(nextRandom() % 62) + 1
+  end
+  appleX = rx
+  appleY = ry
+end
+
+local function init_game(): void
+  headX = 46
+  headY = 30
+  pixelCount = INITIAL_LENGTH
+  prevPixelCount = 0
+  direction = DIR_RIGHT
+  moveTimer = 0
+  
+  for i: int16 = 0, < INITIAL_LENGTH do
+    pixels[i].x = headX - i
+    pixels[i].y = headY
+  end
+  
+  spawnApple()
+  prevAppleX = appleX
+  prevAppleY = appleY
+  
+  clear_screen()
+  draw_rect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, 1)
+  for j: int16 = 0, < pixelCount do
+    set_pixel(pixels[j].x, pixels[j].y, 1)
+  end
+  set_pixel(appleX, appleY, 1)
+  
+  for k: int16 = 0, < pixelCount do
+    prevPixels[k].x = pixels[k].x
+    prevPixels[k].y = pixels[k].y
+  end
+  prevPixelCount = pixelCount
+end
+
+local function createPixel(): void
+  if pixelCount >= MAX_PIXELS then return end
+  local tailX: int16 = pixels[pixelCount - 1].x
+  local tailY: int16 = pixels[pixelCount - 1].y
+  local prevTailX: int16 = pixels[pixelCount - 2].x
+  local prevTailY: int16 = pixels[pixelCount - 2].y
+  local dx: int16 = tailX - prevTailX
+  local dy: int16 = tailY - prevTailY
+  pixels[pixelCount].x = tailX + dx
+  pixels[pixelCount].y = tailY + dy
+  pixelCount = pixelCount + 1
+end
+
+local function update_game(): void
+  nextRandom()
+  local keys: uint8 = poll_input()
+  
+  if (keys & KEY_LEFT) ~= 0 then
+    direction = DIR_LEFT
+  elseif (keys & KEY_RIGHT) ~= 0 then
+    direction = DIR_RIGHT
+  elseif (keys & KEY_UP) ~= 0 then
+    direction = DIR_UP
+  elseif (keys & KEY_DOWN) ~= 0 then
+    direction = DIR_DOWN
+  end
+  
+  moveTimer = moveTimer + 1
+  if moveTimer >= MOVE_INTERVAL then
+    moveTimer = 0
+    
+    if direction == DIR_LEFT then
+      headX = headX - 1
+    elseif direction == DIR_RIGHT then
+      headX = headX + 1
+    elseif direction == DIR_UP then
+      headY = headY - 1
+    elseif direction == DIR_DOWN then
+      headY = headY + 1
+    end
+    
+    if headX <= 0 or headX >= (SCREEN_WIDTH - 1) or headY <= 0 or headY >= (SCREEN_HEIGHT - 1) then
+      init_game()
+      return
+    end
+    
+    for i: int16 = 1, < pixelCount do
+      if pixels[i].x == headX and pixels[i].y == headY then
+        init_game()
+        return
+      end
+    end
+    
+    if headX ~= pixels[0].x or headY ~= pixels[0].y then
+      for j: int16 = pixelCount - 1, > 0, -1 do
+        pixels[j].x = pixels[j - 1].x
+        pixels[j].y = pixels[j - 1].y
+      end
+      pixels[0].x = headX
+      pixels[0].y = headY
+    end
+    
+    if headX == appleX and headY == appleY then
+      createPixel()
+      spawnApple()
+    end
+  end
+end
+
+local function pixelInArray(px: int16, py: int16, arr: *[64]Pixel, count: int16): boolean
+  for i: int16 = 0, < count do
+    if arr[i].x == px and arr[i].y == py then
+      return true
+    end
+  end
+  return false
+end
+
+local function render_game(): void
+  for i: int16 = 0, < prevPixelCount do
+    if not pixelInArray(prevPixels[i].x, prevPixels[i].y, &pixels, pixelCount) then
+      set_pixel(prevPixels[i].x, prevPixels[i].y, 0)
+    end
+  end
+  
+  for j: int16 = 0, < pixelCount do
+    if not pixelInArray(pixels[j].x, pixels[j].y, &prevPixels, prevPixelCount) then
+      set_pixel(pixels[j].x, pixels[j].y, 1)
+    end
+  end
+  
+  if prevAppleX ~= appleX or prevAppleY ~= appleY then
+    if not pixelInArray(prevAppleX, prevAppleY, &pixels, pixelCount) then
+      set_pixel(prevAppleX, prevAppleY, 0)
+    end
+    set_pixel(appleX, appleY, 1)
+    prevAppleX = appleX
+    prevAppleY = appleY
+  end
+  
+  for k: int16 = 0, < pixelCount do
+    prevPixels[k].x = pixels[k].x
+    prevPixels[k].y = pixels[k].y
+  end
+  prevPixelCount = pixelCount
+end
+
+-- ============================================================================
+-- Entry Point
+-- ============================================================================
+
+local function main(): void <entrypoint>
+  init_hw()
+  rngState = 0xACE1
+  init_game()
+  
+  while true do
+    wait_vsync()    
+    render_game()   
+    update_game()   
+  end
+end
