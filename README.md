@@ -2,6 +2,8 @@
 
 A library for developing Pokemon Mini homebrew in [Nelua](https://nelua.io/), targeting the Epson S1C88 8-bit CPU. Nelua source compiles to C89 via an intermediate conversion step, then builds into a `.min` ROM using the TASKING E0C88 toolchain.
 
+![Picture of pokemon mini](https://files.ivie.codes/files/view/90)
+
 ## Prerequisites
 
 - **TASKING E0C88 Toolchain**: Install via [c88-pokemini](https://github.com/pokemon-mini/c88-pokemini):
