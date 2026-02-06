@@ -21,7 +21,11 @@ if ($Source -eq "") {
     $Project = "demo"
 } else {
     if ([System.IO.Path]::IsPathRooted($Source)) {
-        $NeluaSource = [System.IO.Path]::GetRelativePath($ProjectRoot, $Source)
+        try {
+            $NeluaSource = [System.IO.Path]::GetRelativePath($ProjectRoot, $Source)
+        } catch {
+            $NeluaSource = $Source.Substring($ProjectRoot.Length).TrimStart('\', '/')
+        }
     } else {
         $NeluaSource = $Source
     }

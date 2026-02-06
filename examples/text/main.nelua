@@ -1,0 +1,224 @@
+--[[
+  Pokémon Mini Homebrew - Text rendering example
+  Target: Epson S1C88 (8-bit CPU)
+  Toolchain: cc88 + mk88
+
+  Demonstrates drawing text to the screen using a minimal 5x7 bitmap font.
+]]
+
+## pragma{nogc = true, nochecks = true}
+
+require 'pmhw'
+
+-- ============================================================================
+-- 5x7 Bitmap Font (columns stored per character, 5 bytes each)
+-- Each byte is a column: bit 0 = top pixel, bit 6 = bottom pixel.
+-- Covers ASCII 32 (space) through 90 (Z). Characters outside this range
+-- render as a small block.
+-- ============================================================================
+
+local FONT_CHAR_W: int16 <comptime> = 5
+local FONT_CHAR_H: int16 <comptime> = 7
+local FONT_SPACING: int16 <comptime> = 1
+local FONT_FIRST: uint8 <comptime> = 32
+local FONT_LAST: uint8 <comptime> = 90
+local FONT_COUNT: uint16 <comptime> = 59 -- 90 - 32 + 1
+
+local font: [295]uint8 -- FONT_COUNT * 5
+
+local function init_font(): void
+  -- Space (32)
+  font[0]=0x00 font[1]=0x00 font[2]=0x00 font[3]=0x00 font[4]=0x00
+  -- ! (33)
+  font[5]=0x00 font[6]=0x00 font[7]=0x5F font[8]=0x00 font[9]=0x00
+  -- " (34)
+  font[10]=0x00 font[11]=0x07 font[12]=0x00 font[13]=0x07 font[14]=0x00
+  -- # (35)
+  font[15]=0x14 font[16]=0x7F font[17]=0x14 font[18]=0x7F font[19]=0x14
+  -- $ (36)
+  font[20]=0x24 font[21]=0x2A font[22]=0x7F font[23]=0x2A font[24]=0x12
+  -- % (37)
+  font[25]=0x23 font[26]=0x13 font[27]=0x08 font[28]=0x64 font[29]=0x62
+  -- & (38)
+  font[30]=0x36 font[31]=0x49 font[32]=0x55 font[33]=0x22 font[34]=0x50
+  -- ' (39)
+  font[35]=0x00 font[36]=0x05 font[37]=0x03 font[38]=0x00 font[39]=0x00
+  -- ( (40)
+  font[40]=0x00 font[41]=0x1C font[42]=0x22 font[43]=0x41 font[44]=0x00
+  -- ) (41)
+  font[45]=0x00 font[46]=0x41 font[47]=0x22 font[48]=0x1C font[49]=0x00
+  -- * (42)
+  font[50]=0x14 font[51]=0x08 font[52]=0x3E font[53]=0x08 font[54]=0x14
+  -- + (43)
+  font[55]=0x08 font[56]=0x08 font[57]=0x3E font[58]=0x08 font[59]=0x08
+  -- , (44)
+  font[60]=0x00 font[61]=0x50 font[62]=0x30 font[63]=0x00 font[64]=0x00
+  -- - (45)
+  font[65]=0x08 font[66]=0x08 font[67]=0x08 font[68]=0x08 font[69]=0x08
+  -- . (46)
+  font[70]=0x00 font[71]=0x60 font[72]=0x60 font[73]=0x00 font[74]=0x00
+  -- / (47)
+  font[75]=0x20 font[76]=0x10 font[77]=0x08 font[78]=0x04 font[79]=0x02
+  -- 0 (48)
+  font[80]=0x3E font[81]=0x51 font[82]=0x49 font[83]=0x45 font[84]=0x3E
+  -- 1 (49)
+  font[85]=0x00 font[86]=0x42 font[87]=0x7F font[88]=0x40 font[89]=0x00
+  -- 2 (50)
+  font[90]=0x42 font[91]=0x61 font[92]=0x51 font[93]=0x49 font[94]=0x46
+  -- 3 (51)
+  font[95]=0x21 font[96]=0x41 font[97]=0x45 font[98]=0x4B font[99]=0x31
+  -- 4 (52)
+  font[100]=0x18 font[101]=0x14 font[102]=0x12 font[103]=0x7F font[104]=0x10
+  -- 5 (53)
+  font[105]=0x27 font[106]=0x45 font[107]=0x45 font[108]=0x45 font[109]=0x39
+  -- 6 (54)
+  font[110]=0x3C font[111]=0x4A font[112]=0x49 font[113]=0x49 font[114]=0x30
+  -- 7 (55)
+  font[115]=0x01 font[116]=0x71 font[117]=0x09 font[118]=0x05 font[119]=0x03
+  -- 8 (56)
+  font[120]=0x36 font[121]=0x49 font[122]=0x49 font[123]=0x49 font[124]=0x36
+  -- 9 (57)
+  font[125]=0x06 font[126]=0x49 font[127]=0x49 font[128]=0x29 font[129]=0x1E
+  -- : (58)
+  font[130]=0x00 font[131]=0x36 font[132]=0x36 font[133]=0x00 font[134]=0x00
+  -- ; (59)
+  font[135]=0x00 font[136]=0x56 font[137]=0x36 font[138]=0x00 font[139]=0x00
+  -- < (60)
+  font[140]=0x08 font[141]=0x14 font[142]=0x22 font[143]=0x41 font[144]=0x00
+  -- = (61)
+  font[145]=0x14 font[146]=0x14 font[147]=0x14 font[148]=0x14 font[149]=0x14
+  -- > (62)
+  font[150]=0x00 font[151]=0x41 font[152]=0x22 font[153]=0x14 font[154]=0x08
+  -- ? (63)
+  font[155]=0x02 font[156]=0x01 font[157]=0x51 font[158]=0x09 font[159]=0x06
+  -- @ (64)
+  font[160]=0x32 font[161]=0x49 font[162]=0x79 font[163]=0x41 font[164]=0x3E
+  -- A (65)
+  font[165]=0x7E font[166]=0x11 font[167]=0x11 font[168]=0x11 font[169]=0x7E
+  -- B (66)
+  font[170]=0x7F font[171]=0x49 font[172]=0x49 font[173]=0x49 font[174]=0x36
+  -- C (67)
+  font[175]=0x3E font[176]=0x41 font[177]=0x41 font[178]=0x41 font[179]=0x22
+  -- D (68)
+  font[180]=0x7F font[181]=0x41 font[182]=0x41 font[183]=0x22 font[184]=0x1C
+  -- E (69)
+  font[185]=0x7F font[186]=0x49 font[187]=0x49 font[188]=0x49 font[189]=0x41
+  -- F (70)
+  font[190]=0x7F font[191]=0x09 font[192]=0x09 font[193]=0x09 font[194]=0x01
+  -- G (71)
+  font[195]=0x3E font[196]=0x41 font[197]=0x49 font[198]=0x49 font[199]=0x7A
+  -- H (72)
+  font[200]=0x7F font[201]=0x08 font[202]=0x08 font[203]=0x08 font[204]=0x7F
+  -- I (73)
+  font[205]=0x00 font[206]=0x41 font[207]=0x7F font[208]=0x41 font[209]=0x00
+  -- J (74)
+  font[210]=0x20 font[211]=0x40 font[212]=0x41 font[213]=0x3F font[214]=0x01
+  -- K (75)
+  font[215]=0x7F font[216]=0x08 font[217]=0x14 font[218]=0x22 font[219]=0x41
+  -- L (76)
+  font[220]=0x7F font[221]=0x40 font[222]=0x40 font[223]=0x40 font[224]=0x40
+  -- M (77)
+  font[225]=0x7F font[226]=0x02 font[227]=0x0C font[228]=0x02 font[229]=0x7F
+  -- N (78)
+  font[230]=0x7F font[231]=0x04 font[232]=0x08 font[233]=0x10 font[234]=0x7F
+  -- O (79)
+  font[235]=0x3E font[236]=0x41 font[237]=0x41 font[238]=0x41 font[239]=0x3E
+  -- P (80)
+  font[240]=0x7F font[241]=0x09 font[242]=0x09 font[243]=0x09 font[244]=0x06
+  -- Q (81)
+  font[245]=0x3E font[246]=0x41 font[247]=0x51 font[248]=0x21 font[249]=0x5E
+  -- R (82)
+  font[250]=0x7F font[251]=0x09 font[252]=0x19 font[253]=0x29 font[254]=0x46
+  -- S (83)
+  font[255]=0x46 font[256]=0x49 font[257]=0x49 font[258]=0x49 font[259]=0x31
+  -- T (84)
+  font[260]=0x01 font[261]=0x01 font[262]=0x7F font[263]=0x01 font[264]=0x01
+  -- U (85)
+  font[265]=0x3F font[266]=0x40 font[267]=0x40 font[268]=0x40 font[269]=0x3F
+  -- V (86)
+  font[270]=0x1F font[271]=0x20 font[272]=0x40 font[273]=0x20 font[274]=0x1F
+  -- W (87)
+  font[275]=0x3F font[276]=0x40 font[277]=0x38 font[278]=0x40 font[279]=0x3F
+  -- X (88)
+  font[280]=0x63 font[281]=0x14 font[282]=0x08 font[283]=0x14 font[284]=0x63
+  -- Y (89)
+  font[285]=0x07 font[286]=0x08 font[287]=0x70 font[288]=0x08 font[289]=0x07
+  -- Z (90)
+  font[290]=0x61 font[291]=0x51 font[292]=0x49 font[293]=0x45 font[294]=0x43
+end
+
+-- ============================================================================
+-- Text Drawing
+-- ============================================================================
+
+local function draw_char(cx: int16, cy: int16, ch: uint8): void
+  local idx: uint16
+  if ch >= FONT_FIRST and ch <= FONT_LAST then
+    idx = (@uint16)(ch - FONT_FIRST) * 5
+  else
+    -- Unknown character: draw a solid 5x7 block
+    fill_rect(cx, cy, FONT_CHAR_W, FONT_CHAR_H, 1)
+    return
+  end
+
+  for col: int16 = 0, < FONT_CHAR_W do
+    local colData: uint8 = font[idx + (@uint16)(col)]
+    for row: int16 = 0, < FONT_CHAR_H do
+      if (colData & ((@uint8)(1) << (@uint8)(row))) ~= 0 then
+        set_pixel(cx + col, cy + row, 1)
+      end
+    end
+  end
+end
+
+local function draw_text(x: int16, y: int16, text: *[0]uint8, len: uint16): void
+  local cursorX: int16 = x
+  for i: uint16 = 0, < len do
+    draw_char(cursorX, y, text[i])
+    cursorX = cursorX + FONT_CHAR_W + FONT_SPACING
+  end
+end
+
+-- ============================================================================
+-- Game State
+-- ============================================================================
+
+local MESSAGE: [12]uint8
+local MESSAGE_LEN: uint16 <comptime> = 12
+
+local function init_message(): void
+  MESSAGE[0]  = 0x48 -- H
+  MESSAGE[1]  = 0x45 -- E
+  MESSAGE[2]  = 0x4C -- L
+  MESSAGE[3]  = 0x4C -- L
+  MESSAGE[4]  = 0x4F -- O
+  MESSAGE[5]  = 0x20 -- (space)
+  MESSAGE[6]  = 0x57 -- W
+  MESSAGE[7]  = 0x4F -- O
+  MESSAGE[8]  = 0x52 -- R
+  MESSAGE[9]  = 0x4C -- L
+  MESSAGE[10] = 0x44 -- D
+  MESSAGE[11] = 0x21 -- !
+end
+
+-- ============================================================================
+-- Entry Point
+-- ============================================================================
+
+local function main(): void <entrypoint>
+  init_hw()
+  init_font()
+  init_message()
+
+  clear_screen()
+
+  local textW: int16 = (@int16)(MESSAGE_LEN) * (FONT_CHAR_W + FONT_SPACING) - FONT_SPACING
+  local x: int16 = ((@int16)(SCREEN_WIDTH) - textW) /// 2
+  local y: int16 = ((@int16)(SCREEN_HEIGHT) - FONT_CHAR_H) /// 2
+
+  draw_text(x, y, &MESSAGE, MESSAGE_LEN)
+
+  while true do
+    wait_vsync()
+  end
+end
